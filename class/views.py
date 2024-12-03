@@ -3,7 +3,7 @@ from rest_framework import generics, permissions
 from rest_framework.response import Response
 from rest_framework.decorators import api_view, permission_classes
 from users.models import CustomUser
-from .models import Class
+from .models import Class, Wallet
 from .serializers import BulkGroupCreateSerializer, ClassSerializer, GroupDetailSerializer, UserSerializer
 from rest_framework.permissions import IsAuthenticated
 from rest_framework import status
@@ -44,23 +44,26 @@ class ClassCreateView(generics.CreateAPIView):
         serializer.save(teacher=self.request.user)
         return Response(serializer.data, status=status.HTTP_201_CREATED)
 
-# API for students to join a class
+
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
 def join_class(request, class_code):
     try:
         class_to_join = Class.objects.get(class_code=class_code)
     except Class.DoesNotExist:
-        return Response({'error': 'Class not found'}, status=404)
+        return Response({'error': 'Class not found'}, status=status.HTTP_404_NOT_FOUND)
 
     if request.user.role == 'student':
+        if class_to_join.students.filter(id=request.user.id).exists():
+            return Response({'error': 'You are already enrolled in this class'}, status=status.HTTP_409_CONFLICT)
+        
         class_to_join.students.add(request.user)
         class_to_join.save()
-        return Response({'message': 'Joined class successfully'})
+        # Create a wallet for the student for this class
+        Wallet.objects.get_or_create(owner=request.user, class_ref=class_to_join, defaults={'balance': 0.00})
+        return Response({'message': 'Joined class successfully and wallet created'})
     
-    return Response({'error': 'Only students can join classes'}, status=403)
-
-
+    return Response({'error': 'Only students can join classes'}, status=status.HTTP_403_FORBIDDEN)
 
 
 class GroupDetailView(APIView):
@@ -204,10 +207,7 @@ class UserEnrolledClassView(APIView):
         
         return Response({"detail": "User role not recognized."}, status=status.HTTP_400_BAD_REQUEST)
     
-from rest_framework.views import APIView
-from rest_framework.response import Response
-from .models import Group
-from .serializers import GroupSerializer
+
 
 
 class ApproveJoinRequestView(APIView):
@@ -315,3 +315,23 @@ class BulkApprovalView(APIView):
             return Response({"error": "Invalid action"}, status=400)
 
         return Response({"message": message})
+
+
+
+class WalletBalanceView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, class_id):
+        """Get the wallet balance for the logged-in user in the specified class."""
+        # Check if the class exists and the user is enrolled in it
+        class_obj = get_object_or_404(Class, id=class_id)
+
+        if request.user.role == 'student' and not class_obj.students.filter(id=request.user.id).exists():
+            return Response({'error': 'User is not a student in this class'}, status=status.HTTP_403_FORBIDDEN)
+
+        # Fetch the wallet associated with this user and class
+        try:
+            wallet = Wallet.objects.get(owner=request.user, class_ref=class_obj)
+            return Response({'balance': wallet.balance}, status=status.HTTP_200_OK)
+        except Wallet.DoesNotExist:
+            return Response({'error': 'Wallet not found for this class'}, status=status.HTTP_404_NOT_FOUND)

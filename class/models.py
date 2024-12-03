@@ -31,3 +31,24 @@ class Group(models.Model):
 
     def __str__(self):
         return f"{self.name} - {self.class_ref.name}"
+
+
+class Wallet(models.Model):
+    owner = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='wallets')
+    class_ref = models.ForeignKey(Class, on_delete=models.CASCADE, related_name='class_wallets')
+    balance = models.DecimalField(max_digits=10, decimal_places=2, default=0.00)
+
+    def __str__(self):
+        return f"{self.owner.email}'s wallet for {self.class_ref.name}"
+    
+
+
+class Transaction(models.Model):
+    wallet = models.ForeignKey('Wallet', on_delete=models.CASCADE, related_name='transactions')
+    date = models.DateTimeField(auto_now_add=True)
+    amount = models.DecimalField(max_digits=10, decimal_places=2)
+    description = models.CharField(max_length=255)
+    transaction_type = models.CharField(max_length=10, choices=[('credit', 'Credit'), ('debit', 'Debit')])
+
+    def __str__(self):
+        return f"{self.transaction_type} of {self.amount} on {self.date.strftime('%Y-%m-%d')} for {self.wallet.owner.email}"
