@@ -1,11 +1,19 @@
+from urllib import request
 from rest_framework import generics, permissions
 from rest_framework.response import Response
 from rest_framework.decorators import api_view, permission_classes
+from users.models import CustomUser
 from .models import Class
-from .serializers import ClassSerializer
+from .serializers import BulkGroupCreateSerializer, ClassSerializer, GroupDetailSerializer, UserSerializer
 from rest_framework.permissions import IsAuthenticated
 from rest_framework import status
-
+from rest_framework import status
+from rest_framework.response import Response
+from rest_framework.permissions import IsAuthenticated
+from rest_framework.views import APIView
+from .models import Class, Group
+from .serializers import GroupSerializer
+from django.shortcuts import get_object_or_404
 # Custom permission to allow only teachers to create classes
 class IsTeacher(permissions.BasePermission):
     def has_permission(self, request, view):
@@ -22,8 +30,9 @@ class ClassListView(generics.ListAPIView):
         # If the user is a teacher, show only the classes they have created
         if user.role == 'teacher':
             return Class.objects.filter(teacher=user)
+        elif user.role == 'student':
+            return Class.objects.filter(students=user)
         # If the user is a student, show all classes
-        return Class.objects.all()
 
 # Create a class (only for teachers)
 class ClassCreateView(generics.CreateAPIView):
@@ -52,13 +61,7 @@ def join_class(request, class_code):
     return Response({'error': 'Only students can join classes'}, status=403)
 
 
-from rest_framework import status
-from rest_framework.response import Response
-from rest_framework.permissions import IsAuthenticated
-from rest_framework.views import APIView
-from .models import Class, Group
-from .serializers import GroupSerializer
-from django.shortcuts import get_object_or_404
+
 
 class GroupDetailView(APIView):
     permission_classes = [IsAuthenticated]
@@ -119,3 +122,196 @@ class AllGroupsInClassView(APIView):
         serializer = GroupSerializer(groups, many=True)
         
         return Response(serializer.data, status=status.HTTP_200_OK)
+
+
+
+class GroupCreateView(generics.CreateAPIView):
+    serializer_class = GroupSerializer
+    permission_classes = [IsAuthenticated, IsTeacher]
+
+    def perform_create(self, serializer):
+        # Get the class based on class_id from the URL
+        class_id = self.request.data.get('class_ref')
+        class_obj = get_object_or_404(Class, id=class_id)
+
+        # Ensure the logged-in user is the teacher of this class
+        if self.request.user != class_obj.teacher:
+            return Response({"detail": "You are not authorized to create groups for this class."}, status=status.HTTP_403_FORBIDDEN)
+
+        # Create the group and set the current user as the creator and class_ref as the class
+        serializer.save(creator=self.request.user, class_ref=class_obj) 
+
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def join_group(request, group_id):
+    group = get_object_or_404(Group, id=group_id)
+    user = request.user
+    
+    # Check if student is already in another group in the same class
+    class_groups = Group.objects.filter(class_ref=group.class_ref, students=user)
+    if class_groups.exists():
+        return Response({"error": "Already in another group in this class."}, status=403)
+    
+    # Check if max_students limit has been reached
+    if group.max_students and group.students.count() >= group.max_students:
+        return Response({"error": "Group is full."}, status=403)
+
+    # If approval is required, add to pending approvals
+    if group.requires_approval:
+        group.pending_approvals.add(user)
+        return Response({"message": "Join request submitted for approval."}, status=200)
+    else:
+        group.students.add(user)
+        return Response({"message": "Successfully joined the group."}, status=200)
+
+
+class GroupDetailWithStudentsView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, group_id):
+        # Get the group based on the provided group_id
+        group = get_object_or_404(Group, id=group_id)
+        
+        # Serialize the group data, including nested students
+        serializer = GroupDetailSerializer(group)
+        
+        return Response(serializer.data, status=status.HTTP_200_OK)
+    
+
+class UserEnrolledClassView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        """Retrieve the class the user is enrolled in."""
+        user = request.user
+
+        if user.role == 'student':
+            # Get the class where the student is enrolled
+            enrolled_classes = Class.objects.filter(students=user)
+            if enrolled_classes.exists():
+                serializer = ClassSerializer(enrolled_classes.first())  # Assuming a student is enrolled in one class
+                return Response(serializer.data, status=status.HTTP_200_OK)
+            else:
+                return Response({"detail": "User is not enrolled in any class."}, status=status.HTTP_404_NOT_FOUND)
+
+        elif user.role == 'teacher':
+            # Get the classes where the teacher is the creator
+            created_classes = Class.objects.filter(teacher=user)
+            serializer = ClassSerializer(created_classes, many=True)
+            return Response(serializer.data, status=status.HTTP_200_OK)
+        
+        return Response({"detail": "User role not recognized."}, status=status.HTTP_400_BAD_REQUEST)
+    
+from rest_framework.views import APIView
+from rest_framework.response import Response
+from .models import Group
+from .serializers import GroupSerializer
+
+
+class ApproveJoinRequestView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, group_id):
+        group = get_object_or_404(Group, id=group_id)
+        
+        # Ensure the request is made by the teacher
+        if request.user != group.class_ref.teacher:
+            return Response({"error": "Not authorized"}, status=403)
+
+        # Check if only the count is needed
+        only_count = request.query_params.get('count', False)
+
+        # List pending approvals
+        pending_users = group.pending_approvals.all()
+        
+        # If only the count is needed
+        if only_count:
+            return Response({"count": pending_users.count()})
+
+        # Return details if count is not specifically requested
+        user_details = [{"id": user.id, "username": user.username} for user in pending_users]
+        return Response({"pending_approvals": user_details, "count": len(user_details)})
+
+    def post(self, request, group_id):
+        group = get_object_or_404(Group, id=group_id)
+        user_id = request.data.get("user_id")
+        action = request.data.get("action")  # 'approve' or 'decline'
+        
+        if request.user != group.class_ref.teacher:
+            return Response({"error": "Not authorized"}, status=403)
+
+        student = get_object_or_404(CustomUser, id=user_id)
+        
+        if action == "approve":
+            group.students.add(student)
+            group.pending_approvals.remove(student)
+            return Response({"message": "Student approved to join."})
+        
+        elif action == "decline":
+            group.pending_approvals.remove(student)
+            return Response({"message": "Student request declined."})
+        
+        return Response({"error": "Invalid action"}, status=400)
+
+
+
+class BulkGroupCreateView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, class_id):
+        # Check if the logged-in user is the teacher for the class
+        class_obj = get_object_or_404(Class, id=class_id)
+        if request.user != class_obj.teacher:
+            return Response({"error": "Not authorized to create groups for this class."}, status=status.HTTP_403_FORBIDDEN)
+
+        serializer = BulkGroupCreateSerializer(data=request.data)
+        if serializer.is_valid():
+            data = serializer.validated_data
+            groups = []
+
+            # Loop to create the specified number of groups
+            for i in range(data['number_of_groups']):
+                group_name = f"{data['group_name_prefix']} {i + 1}"
+                group = Group(
+                    name=group_name,
+                    max_students=data['max_students'],
+                    requires_approval=data['requires_approval'],
+                    class_ref=class_obj,
+                    creator=request.user
+                )
+                group.save()
+                groups.append(group)
+
+            return Response(
+                {"message": f"{data['number_of_groups']} groups created successfully.", "groups": [group.name for group in groups]},
+                status=status.HTTP_201_CREATED
+            )
+
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+class BulkApprovalView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, group_id):
+        group = get_object_or_404(Group, id=group_id)
+        user_ids = request.data.get("user_ids", [])  # List of user IDs
+        action = request.data.get("action")  # 'approve' or 'decline'
+        
+        if request.user != group.class_ref.teacher:
+            return Response({"error": "Not authorized"}, status=403)
+        
+        students = CustomUser.objects.filter(id__in=user_ids)
+        
+        if action == "approve":
+            group.students.add(*students)
+            group.pending_approvals.remove(*students)
+            message = "Students approved to join."
+        elif action == "decline":
+            group.pending_approvals.remove(*students)
+            message = "Student requests declined."
+        else:
+            return Response({"error": "Invalid action"}, status=400)
+
+        return Response({"message": message})
