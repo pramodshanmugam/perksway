@@ -3,8 +3,8 @@ from rest_framework import generics, permissions
 from rest_framework.response import Response
 from rest_framework.decorators import api_view, permission_classes
 from users.models import CustomUser
-from .models import Class, Wallet
-from .serializers import BulkGroupCreateSerializer, ClassSerializer, GroupDetailSerializer, UserSerializer
+from .models import Class, Item, PurchaseRequest, Wallet
+from .serializers import BulkGroupCreateSerializer, ClassSerializer, GroupDetailSerializer, ItemSerializer, PurchaseRequestSerializer, UserSerializer
 from rest_framework.permissions import IsAuthenticated
 from rest_framework import status
 from rest_framework import status
@@ -14,6 +14,8 @@ from rest_framework.views import APIView
 from .models import Class, Group
 from .serializers import GroupSerializer
 from django.shortcuts import get_object_or_404
+from decimal import Decimal
+
 # Custom permission to allow only teachers to create classes
 class IsTeacher(permissions.BasePermission):
     def has_permission(self, request, view):
@@ -335,3 +337,186 @@ class WalletBalanceView(APIView):
             return Response({'balance': wallet.balance}, status=status.HTTP_200_OK)
         except Wallet.DoesNotExist:
             return Response({'error': 'Wallet not found for this class'}, status=status.HTTP_404_NOT_FOUND)
+
+
+from rest_framework.permissions import IsAuthenticated
+from rest_framework.response import Response
+from rest_framework.views import APIView
+from django.shortcuts import get_object_or_404
+from .models import Class, CustomUser, Wallet
+
+class WalletUpdateView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def put(self, request, class_id):
+        student_email = request.data.get('email')
+        amount = request.data.get('amount')
+
+        # Validate input
+        if not student_email or not amount:
+            return Response({"error": "Missing email or amount."}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            class_obj = get_object_or_404(Class, id=class_id)
+            student = class_obj.students.get(email=student_email)  # Directly get student from class students set
+        except Class.DoesNotExist:
+            return Response({"error": "Class not found"}, status=status.HTTP_404_NOT_FOUND)
+        except CustomUser.DoesNotExist:
+            return Response({"error": "Student not found in this class"}, status=status.HTTP_404_NOT_FOUND)
+
+        # Get or create a wallet for the student in this class
+        wallet, created = Wallet.objects.get_or_create(owner=student, class_ref=class_obj, defaults={'balance': 0.00})
+
+        try:
+            # Convert amount to float and update the wallet balance
+            amount = Decimal(amount)
+            wallet.balance += amount
+            wallet.save()
+            return Response({"message": "Wallet updated successfully.", "new_balance": wallet.balance}, status=status.HTTP_200_OK)
+        except ValueError:
+            return Response({"error": "Invalid amount format. Please provide a valid number."}, status=status.HTTP_400_BAD_REQUEST)
+
+
+class ItemListCreateView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, class_id):
+        print(request.user.role)
+        # Ensure the user is the teacher for the class
+        class_obj = get_object_or_404(Class, id=class_id)
+        # if request.user != class_obj.teacher:
+        #     return Response({"error": "You are not authorized to manage items for this class."}, status=status.HTTP_403_FORBIDDEN)
+
+        # List all items for the class
+        items = Item.objects.filter(class_ref=class_obj)
+        serializer = ItemSerializer(items, many=True)
+        return Response(serializer.data, status=status.HTTP_200_OK)
+
+    def post(self, request, class_id):
+        # Ensure the user is the teacher for the class
+        class_obj = get_object_or_404(Class, id=class_id)
+        if request.user != class_obj.teacher:
+            return Response({"error": "You are not authorized to create items for this class."}, status=status.HTTP_403_FORBIDDEN)
+        print ("test1111")
+        print (class_obj.id)
+        # Include the class_ref when creating an item
+        request.data['class_ref'] = class_obj.id
+        serializer = ItemSerializer(data=request.data)
+        if serializer.is_valid():
+            serializer.save()
+            return Response(serializer.data, status=status.HTTP_201_CREATED)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+class ItemDetailView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, class_id, item_id):
+        print(request.user.role)
+        class_obj = get_object_or_404(Class, id=class_id)
+        item = get_object_or_404(Item, id=item_id, class_ref=class_obj)
+        serializer = ItemSerializer(item)
+        return Response(serializer.data, status=status.HTTP_200_OK)
+
+    def put(self, request, class_id, item_id):
+        class_obj = get_object_or_404(Class, id=class_id)
+        item = get_object_or_404(Item, id=item_id, class_ref=class_obj)
+        serializer = ItemSerializer(item, data=request.data, partial=True)
+        if serializer.is_valid():
+            serializer.save()
+            return Response(serializer.data, status=status.HTTP_200_OK)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+    def delete(self, request, class_id, item_id):
+        class_obj = get_object_or_404(Class, id=class_id)
+        item = get_object_or_404(Item, id=item_id, class_ref=class_obj)
+        item.delete()
+        return Response({"detail": "Item deleted successfully."}, status=status.HTTP_204_NO_CONTENT)
+
+
+
+
+class PurchaseApprovalView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, class_id):
+        """Retrieve all pending purchase requests for the teacher's class."""
+        class_obj = get_object_or_404(Class, id=class_id)
+
+        # Ensure the logged-in user is the teacher of the class
+        if request.user != class_obj.teacher:
+            return Response({"error": "You are not authorized to approve purchases for this class."}, status=403)
+
+        # Fetch all pending purchase requests for the class
+        pending_requests = PurchaseRequest.objects.filter(class_ref=class_obj, status='pending')
+        serializer = PurchaseRequestSerializer(pending_requests, many=True)
+        
+        return Response(serializer.data, status=200)
+
+    def post(self, request, request_id):
+        """Approve or decline a purchase request."""
+        purchase_request = get_object_or_404(PurchaseRequest, id=request_id)
+
+        # Ensure the logged-in user is the teacher of the class
+        if request.user != purchase_request.class_ref.teacher:
+            return Response({"error": "You are not authorized to approve or decline this purchase."}, status=403)
+
+        action = request.data.get('action')  # 'approve' or 'decline'
+        
+        if action == "approve":
+            # Deduct the amount from the student's wallet and complete the purchase
+            wallet = get_object_or_404(Wallet, owner=purchase_request.student, class_ref=purchase_request.class_ref)
+            
+            if wallet.balance < purchase_request.amount:
+                return Response({"error": "Student does not have enough balance to complete the purchase."}, status=400)
+
+            # Deduct the amount from the wallet
+            wallet.balance -= purchase_request.amount
+            wallet.save()
+
+            # Update the purchase request status to 'approved'
+            purchase_request.status = 'approved'
+            purchase_request.save()
+
+            return Response({"message": "Purchase approved and wallet updated."}, status=200)
+
+        elif action == "decline":
+            # Update the purchase request status to 'declined'
+            purchase_request.status = 'declined'
+            purchase_request.save()
+
+            return Response({"message": "Purchase request declined."}, status=200)
+
+        return Response({"error": "Invalid action. Use 'approve' or 'decline'."}, status=400)
+
+class PurchaseRequestView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, class_id, item_id):
+        """Send a purchase request for an item."""
+        # Ensure the class exists and the student is enrolled
+        class_obj = get_object_or_404(Class, id=class_id)
+
+        if not class_obj.students.filter(id=request.user.id).exists():
+            return Response({"error": "You are not enrolled in this class."}, status=status.HTTP_403_FORBIDDEN)
+        
+        # Ensure the item exists in the class
+        item = get_object_or_404(Item, id=item_id, class_ref=class_obj)
+
+        # Check the student's wallet balance
+        wallet = get_object_or_404(Wallet, owner=request.user, class_ref=class_obj)
+
+        if wallet.balance < item.price:
+            return Response({"error": "Insufficient balance to make this purchase."}, status=status.HTTP_400_BAD_REQUEST)
+
+        # Create a purchase request
+        purchase_request = PurchaseRequest.objects.create(
+            student=request.user,
+            item=item,
+            class_ref=class_obj,
+            amount=item.price,
+            status='pending',  # Initially set the status to 'pending'
+        )
+
+        # Return the purchase request data
+        serializer = PurchaseRequestSerializer(purchase_request)
+        return Response(serializer.data, status=status.HTTP_201_CREATED)

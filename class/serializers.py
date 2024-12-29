@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import Class, Group
+from .models import Class, Group, Item, PurchaseRequest, Wallet
 from users.models import CustomUser
 
 class UserSerializer(serializers.ModelSerializer):
@@ -43,3 +43,23 @@ class BulkGroupCreateSerializer(serializers.Serializer):
         if data['number_of_groups'] > 100:  # Arbitrary limit to prevent excessive group creation
             raise serializers.ValidationError("Too many groups requested.")
         return data
+    
+class ItemSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Item
+        fields = ['id', 'name', 'description', 'price', 'image', 'class_ref']
+
+class WalletSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Wallet
+        fields = ['id', 'balance']
+
+class PurchaseRequestSerializer(serializers.ModelSerializer):
+    student = serializers.StringRelatedField()  # Display the username of the student
+    item = serializers.StringRelatedField()  # Display the name of the item
+    class_ref = serializers.StringRelatedField()  # Display the name of the class (optional)
+    
+    class Meta:
+        model = PurchaseRequest
+        fields = ['id', 'student', 'item', 'amount', 'status', 'requested_at', 'class_ref']
+        read_only_fields = ['id', 'student', 'item', 'requested_at', 'class_ref']

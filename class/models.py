@@ -1,6 +1,7 @@
 from django.db import models
 from django.conf import settings
 from users.models import CustomUser  
+from django.core.validators import MinValueValidator
 
 class Class(models.Model):
     name = models.CharField(max_length=100)
@@ -52,3 +53,36 @@ class Transaction(models.Model):
 
     def __str__(self):
         return f"{self.transaction_type} of {self.amount} on {self.date.strftime('%Y-%m-%d')} for {self.wallet.owner.email}"
+    
+from django.db import models
+from django.conf import settings
+
+class Item(models.Model):
+    name = models.CharField(max_length=100)
+    description = models.TextField()
+    price = models.DecimalField(max_digits=6, decimal_places=2)
+    image = models.ImageField(upload_to='byte_bazaar_items/', blank=True, null=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    class_ref = models.ForeignKey(Class, on_delete=models.CASCADE, related_name='class_items')
+
+
+    def __str__(self):
+        return self.name
+
+
+class PurchaseRequest(models.Model):
+    STATUS_CHOICES = (
+        ('pending', 'Pending'),
+        ('approved', 'Approved'),
+        ('declined', 'Declined'),
+    )
+
+    student = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
+    item = models.ForeignKey(Item, on_delete=models.CASCADE)
+    class_ref = models.ForeignKey(Class, on_delete=models.CASCADE)
+    amount = models.DecimalField(max_digits=6, decimal_places=2)
+    status = models.CharField(max_length=10, choices=STATUS_CHOICES, default='pending')
+    requested_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f"Purchase request for {self.item.name} by {self.student.username}"
