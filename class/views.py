@@ -94,16 +94,19 @@ class GroupDetailView(APIView):
         serializer = GroupSerializer(groups, many=True)
         return Response(serializer.data, status=status.HTTP_200_OK)
 
+    
     def put(self, request, group_id):
-        """Update group details (only by the creator)."""
-        group = self.get_group(group_id, request.user)
-        if not group:
-            return Response({"detail": "Permission denied. You are not the creator of this group."}, status=status.HTTP_403_FORBIDDEN)
+        """Update details of a specific group (only allowed for the teacher)."""
+        group = get_object_or_404(Group, id=group_id)
+
+        # Ensure the user is the creator/teacher of the class the group belongs to
+        if request.user != group.class_ref.teacher:
+            return Response({"error": "You are not authorized to update this group."}, status=status.HTTP_403_FORBIDDEN)
 
         serializer = GroupSerializer(group, data=request.data, partial=True)
         if serializer.is_valid():
             serializer.save()
-            return Response(serializer.data)
+            return Response(serializer.data, status=status.HTTP_200_OK)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
     def delete(self, request, group_id):
