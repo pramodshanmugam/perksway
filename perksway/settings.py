@@ -79,7 +79,9 @@ WSGI_APPLICATION = 'perksway.wsgi.application'
 
 CORS_ALLOWED_ORIGINS = [
     'http://localhost:3000',  # React app running on port 3000
-    'https://your-production-domain.com',  # Your production frontend domain
+    'https://your-production-domain.com',
+        'http://167.88.45.167:3000',
+ "http://167.88.45.167:3000",
 ]
 CORS_ALLOW_METHODS = [
     'GET',
@@ -172,3 +174,13 @@ DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
 # settings.py
 AUTH_USER_MODEL = 'users.CustomUser'
+from datetime import timedelta
+
+SIMPLE_JWT = {
+    'ACCESS_TOKEN_LIFETIME': timedelta(minutes=5),  # Set access token lifetime
+    'REFRESH_TOKEN_LIFETIME': timedelta(days=1),    # Set refresh token lifetime
+    'ROTATE_REFRESH_TOKENS': False,
+    'BLACKLIST_AFTER_ROTATION': True,
+    'ALGORITHM': 'HS256',
+    'AUTH_HEADER_TYPES': ('Bearer',),
+}

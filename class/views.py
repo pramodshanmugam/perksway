@@ -94,16 +94,19 @@ class GroupDetailView(APIView):
         serializer = GroupSerializer(groups, many=True)
         return Response(serializer.data, status=status.HTTP_200_OK)
 
+    
     def put(self, request, group_id):
-        """Update group details (only by the creator)."""
-        group = self.get_group(group_id, request.user)
-        if not group:
-            return Response({"detail": "Permission denied. You are not the creator of this group."}, status=status.HTTP_403_FORBIDDEN)
+        """Update details of a specific group (only allowed for the teacher)."""
+        group = get_object_or_404(Group, id=group_id)
+
+        # Ensure the user is the creator/teacher of the class the group belongs to
+        if request.user != group.class_ref.teacher:
+            return Response({"error": "You are not authorized to update this group."}, status=status.HTTP_403_FORBIDDEN)
 
         serializer = GroupSerializer(group, data=request.data, partial=True)
         if serializer.is_valid():
             serializer.save()
-            return Response(serializer.data)
+            return Response(serializer.data, status=status.HTTP_200_OK)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
     def delete(self, request, group_id):
@@ -233,7 +236,7 @@ class ApproveJoinRequestView(APIView):
             return Response({"count": pending_users.count()})
 
         # Return details if count is not specifically requested
-        user_details = [{"id": user.id, "username": user.username} for user in pending_users]
+        user_details = [{"id": user.id, "firstname": user.first_name, "lastname": user.last_name, } for user in pending_users]
         return Response({"pending_approvals": user_details, "count": len(user_details)})
 
     def post(self, request, group_id):
@@ -432,6 +435,25 @@ class ItemDetailView(APIView):
         item.delete()
         return Response({"detail": "Item deleted successfully."}, status=status.HTTP_204_NO_CONTENT)
 
+
+
+
+class PurchaseView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, class_id):
+        """Retrieve all pending purchase requests for the teacher's class."""
+        class_obj = get_object_or_404(Class, id=class_id)
+
+        # Ensure the logged-in user is the teacher of the class
+        if request.user != class_obj.teacher:
+            return Response({"error": "You are not authorized to approve purchases for this class."}, status=403)
+
+        # Fetch all pending purchase requests for the class
+        pending_requests = PurchaseRequest.objects.filter(class_ref=class_obj)
+        serializer = PurchaseRequestSerializer(pending_requests, many=True)
+        
+        return Response(serializer.data, status=200)
 
 
 
