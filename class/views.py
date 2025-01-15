@@ -236,7 +236,7 @@ class ApproveJoinRequestView(APIView):
             return Response({"count": pending_users.count()})
 
         # Return details if count is not specifically requested
-        user_details = [{"id": user.id, "firstname": user.first_name, "lastname": user.last_name, } for user in pending_users]
+        user_details = [{"id": user.id, "username": user.username} for user in pending_users]
         return Response({"pending_approvals": user_details, "count": len(user_details)})
 
     def post(self, request, group_id):
