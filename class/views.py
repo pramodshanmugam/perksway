@@ -111,7 +111,7 @@ class GroupDetailView(APIView):
 
     def delete(self, request, group_id):
         """Delete group (only by the creator)."""
-        group = self.get_group(group_id, request.user)
+        group = get_object_or_404(Group, group_id)
         if not group:
             return Response({"detail": "Permission denied. You are not the creator of this group."}, status=status.HTTP_403_FORBIDDEN)
 
@@ -542,3 +542,27 @@ class PurchaseRequestView(APIView):
         # Return the purchase request data
         serializer = PurchaseRequestSerializer(purchase_request)
         return Response(serializer.data, status=status.HTTP_201_CREATED)
+    
+
+class LeaveClassView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def delete(self, request, class_id):
+        """Allow a student to leave a class."""
+        # Get the class object
+        class_obj = get_object_or_404(Class, id=class_id)
+
+        # Ensure the user is a student and enrolled in the class
+        if request.user.role != 'student':
+            return Response({"error": "Only students can leave classes."}, status=status.HTTP_403_FORBIDDEN)
+
+        if not class_obj.students.filter(id=request.user.id).exists():
+            return Response({"error": "You are not enrolled in this class."}, status=status.HTTP_403_FORBIDDEN)
+
+        # Remove the student from the class
+        class_obj.students.remove(request.user)
+
+        # Delete the student's wallet associated with the class
+        Wallet.objects.filter(owner=request.user, class_ref=class_obj).delete()
+
+        return Response({"message": "You have successfully left the class."}, status=status.HTTP_204_NO_CONTENT)

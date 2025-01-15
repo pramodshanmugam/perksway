@@ -1,5 +1,5 @@
 from django.urls import path
-from .views import ApproveJoinRequestView, PurchaseView, BulkApprovalView, BulkGroupCreateView, ClassListView, ClassCreateView, GroupDetailWithStudentsView, ItemDetailView, ItemListCreateView, PurchaseApprovalView, PurchaseRequestView, UserEnrolledClassView, WalletBalanceView, WalletUpdateView,  join_class, GroupDetailView, AllGroupsInClassView, GroupCreateView, join_group
+from .views import ApproveJoinRequestView, LeaveClassView, PurchaseView, BulkApprovalView, BulkGroupCreateView, ClassListView, ClassCreateView, GroupDetailWithStudentsView, ItemDetailView, ItemListCreateView, PurchaseApprovalView, PurchaseRequestView, UserEnrolledClassView, WalletBalanceView, WalletUpdateView,  join_class, GroupDetailView, AllGroupsInClassView, GroupCreateView, join_group
 
 urlpatterns = [
     path('', ClassListView.as_view(), name='class_list'),
@@ -23,6 +23,7 @@ urlpatterns = [
     # URL to approve/decline a specific purchase request by request_id
     path('purchase-request/<int:request_id>/action/', PurchaseApprovalView.as_view(), name='approve-decline-purchase-request'),
     path('<int:class_id>/purchase/', PurchaseView.as_view(), name='purchase-item'),
+    path('<int:class_id>/leave/', LeaveClassView.as_view(), name='leave-class'),
 ]
 
 
