@@ -111,7 +111,7 @@ class GroupDetailView(APIView):
 
     def delete(self, request, group_id):
         """Delete group (only by the creator)."""
-        group = get_object_or_404(Group, group_id)
+        group = get_object_or_404(Group, id=group_id)
         if not group:
             return Response({"detail": "Permission denied. You are not the creator of this group."}, status=status.HTTP_403_FORBIDDEN)
 
